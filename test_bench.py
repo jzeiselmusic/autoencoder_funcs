@@ -12,10 +12,10 @@ anom_loc = ''
 ##
 
 train_generator, validation_generator = data_generator(BATCH_SIZE,train_loc,val_loc)
-# test_generator, anom_generator = testing_generator(BATCH_NORM,BATCH_ANOM,test_loc,anom_loc)
+test_generator, anom_generator = testing_generator(BATCH_NORM,BATCH_ANOM,test_loc,anom_loc)
 
-anom_array = np.load('anomaly_images.npy') # load images into a numpy array
-norm_array = np.load('normal_images.npy')  # because the generator is slow when testing
+#anom_array = np.load('anomaly_images.npy') # load images into a numpy array
+#norm_array = np.load('normal_images.npy')  # because the generator is slow when testing
 
 model, encoder, decoder = build_model(FINAL_LAYER=25)
 compile_train_model(model, 20, .001, .8, .9, train_generator, validation_generator)
