@@ -11,15 +11,14 @@ from keras.preprocessing.image import ImageDataGenerator
 
 ## model creator
 
-def data_generator(batch_size, train_loc, val_loc):
+def data_generator(batch_size):
   ## return a generator for training and validating samples
   ## shuffling is "true"
-  ## my images are 270x480x3 color images
 
   BATCH_SIZE = batch_size
   train_datagen = ImageDataGenerator(rescale=1./255, data_format='channels_last')
   train_generator = train_datagen.flow_from_directory(
-    train_loc,
+    './train_ims',
     target_size=(270,480),
     batch_size=BATCH_SIZE,
     class_mode='input',
@@ -27,7 +26,7 @@ def data_generator(batch_size, train_loc, val_loc):
     )
   test_datagen = ImageDataGenerator(rescale=1./255, data_format='channels_last')
   validation_generator = test_datagen.flow_from_directory(
-    val_loc,
+    './test_ims',
     target_size=(270,480),
     batch_size=BATCH_SIZE,
     class_mode='input',
@@ -35,12 +34,12 @@ def data_generator(batch_size, train_loc, val_loc):
     )
   return train_generator, validation_generator
 
-def testing_generator(batch_size_norm, batch_size_anom, test_loc, anom_loc):
+def testing_generator(batch_size_norm, batch_size_anom):
   ## return a generator for testing normal and anomalous images
   ## shuffling is "false"
   test_datagen = ImageDataGenerator(rescale=1./255, data_format='channels_last')
   validation_generator = test_datagen.flow_from_directory(
-    test_loc,
+    './test_ims',
     target_size=(270,480),
     batch_size = batch_size_norm,
     class_mode='input',
@@ -48,7 +47,7 @@ def testing_generator(batch_size_norm, batch_size_anom, test_loc, anom_loc):
     )
 
   anomaly_generator = test_datagen.flow_from_directory(
-    anom_loc,
+    './anomaly_ims',
     target_size=(270,480),
     class_mode='input',
     batch_size = batch_size_anom,
@@ -91,16 +90,6 @@ def build_model(FINAL_LAYER):
   model = keras.Model(inputs=inputs,outputs=reconstructions)
   return model, encoder_model, decoder_model
 
-
-def load_saved_model(name):
-  model = tf.keras.models.load_model(name)
-  return model
-
-def save_model(model, name):
-  model.save(name)
-  print("model successfully saved to working directory")
-
-
 def compile_train_model(model, EPOCHS, LR, B1, B2, train_generator, val_generator):
   callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss',min_delta=0.0, patience=3)
   model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LR,beta_1=B1,beta_2=B2),
@@ -110,17 +99,23 @@ def compile_train_model(model, EPOCHS, LR, B1, B2, train_generator, val_generato
         epochs=EPOCHS,
         callbacks=[callback],
         validation_data=val_generator)
-
   
+  
+def load_saved_model(name):
+  model = tf.keras.models.load_model(name)
+  return model
+
+def save_model(model, name):
+  model.save(name)
+  print("model successfully saved to working directory")
+
 
 def make_grey(img):
   return color.rgb2gray(img)
   
-
 def visualize_results(model, num, generator):
   out_pred = model.predict(generator[num][0])[0,:,:,:]
   out_true = generator[num][0][0,:,:,:]
-
   plt.figure(0)
   plt.imshow(out_pred)
   plt.show()
@@ -128,15 +123,16 @@ def visualize_results(model, num, generator):
   plt.imshow(out_true)
   plt.show()
 
-
 def visualize_error(img_true,img_pred):
   error_map = abs(img_true - img_pred)
   plt.figure(0)
   plt.imshow(error_map)
   plt.show()
+  ## no return
 
-def calc_entropy(grey_error):
+def calc_entropy(grey_error, bins):
   # accepts a grey error plot
+  # bins are number of bins with which to calculate entropy
   # split the error plot up into 4 smaller sub-images
   # calculate the entropy in each one.
   # return the smallest entropy value
@@ -145,15 +141,15 @@ def calc_entropy(grey_error):
   ii = int(grey_error.shape[0])
   jj = int(grey_error.shape[1])
 
-  error_plot_TL = error_plot[0:i,0:j]
-  error_plot_TR = error_plot[0:i,j:jj]
-  error_plot_BL = error_plot[i:ii,0:j]
-  error_plot_BR = error_plot[i:ii,j:jj]
+  error_plot_TL = grey_error[0:i,0:j]
+  error_plot_TR = grey_error[0:i,j:jj]
+  error_plot_BL = grey_error[i:ii,0:j]
+  error_plot_BR = grey_error[i:ii,j:jj]
 
-  hist_TL = np.histogram(error_plot_TL,bins=256)[1]
-  hist_TR = np.histogram(error_plot_TR,bins=256)[1]
-  hist_BL = np.histogram(error_plot_BL,bins=256)[1]
-  hist_BR = np.histogram(error_plot_BR,bins=256)[1]
+  hist_TL = np.histogram(error_plot_TL,bins=bins)[1]
+  hist_TR = np.histogram(error_plot_TR,bins=bins)[1]
+  hist_BL = np.histogram(error_plot_BL,bins=bins)[1]
+  hist_BR = np.histogram(error_plot_BR,bins=bins)[1]
 
   ENT_TL = scipy.stats.entropy(hist_TL / np.sum(hist_TL))
   ENT_TR = scipy.stats.entropy(hist_TR / np.sum(hist_TR))
@@ -174,6 +170,7 @@ def calc_std(grey_error):
       for j in range(grey_error.shape[1]):
           if (grey_error[i,j] > (mean+(2*std))):
               tuple_array = np.append(tuple_array,np.array([[i,j]]),0)
+
   tuple_array = np.delete(tuple_array,0,0) ## get rid of starter value
 
   total_std = np.std(tuple_array[:,0])*np.std(tuple_array[:,1])
@@ -203,47 +200,37 @@ def test_threshold(normal_array, anom_array, thresh, greater_or_less):
   ## within 2 arrays and a certain threshold, 
   ## must tell whether anomalies should be greater than or less than threshold ("<" or ">")
   import operator
-
   if greater_or_less == "<":
+    print("less than")
     op_func = operator.lt
     opp_op_func = operator.gt
   else:
     op_func = operator.gt
     opp_op_func = operator.lt
-
-  CORRECT_NORMALS = 0
-  INCORRECT_NORMALS = 0
-  CORRECT_ANOMS = 0
-  INCORRECT_ANOMS = 0
-  for i in range(len(normal_array)):
-    if opp_op_func(normal_array[i], thresh):
-      CORRECT_NORMALS += 1
-    else:
-      INCORRECT_NORMALS += 1
-  for i in range(len(anom_array)):
-    if op_func(anom_array[i],thresh):
-      CORRECT_ANOMS += 1
-    else:
-      INCORRECT_ANOMS += 1
-
+      
+  CORRECT_ANOMS = sum([op_func(n,thresh) for n in anom_array])
+  INCORRECT_ANOMS = sum([opp_op_func(n,thresh) for n in anom_array])
+  CORRECT_NORMALS = sum([opp_op_func(n,thresh) for n in normal_array])
+  INCORRECT_NORMALS = sum([op_func(n,thresh) for n in normal_array])
   print(f"number of normals guessed correctly: {CORRECT_NORMALS}")
   print(f"number of normals guessed incorrectly: {INCORRECT_NORMALS}")
   print(f"number of anomalies guessed correctly: {CORRECT_ANOMS}")
   print(f"number of anomalies guessed incorrectly: {INCORRECT_ANOMS}")
-
+  ## no return
 
 def reconstruct(model, array, p):
-  img = anom_img_array[p]
+  img = array[p]
   reconstruction = model(np.expand_dims(img,0))
   reconstruction = np.squeeze(reconstruction)
   return reconstruction
 
 
-def plot_hist(array_norm, array_anom, bins):
+def plot_hist(array_norm, array_anom, BINS):
   ## plot one hist of two arrays
   ## blue is normal samples
   ## red is anomalous samples
   fig = plt.figure()
-  plt.hist(array_norm,bins=bins,color='b')
-  plt.hist(array_anom,bins=bins,color='r')
+  plt.hist(array_norm,bins=BINS,color='b')
+  plt.hist(array_anom,bins=BINS,color='r')
   plt.show()
+  ## no return
